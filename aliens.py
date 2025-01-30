@@ -386,8 +386,8 @@ class Score(pg.sprite.Sprite):
 
 
 class AliensEnv:
-    def __init__(self, surface, episode=0, render=True, fps=40, play_sounds=False):
-        self.surface = surface
+    def __init__(self, episode=0, render=True, fps=40, play_sounds=False):
+        self.window = pg.display.set_mode((840, 660))
         self.surfrect = surface.get_rect()
         global SCREENRECT
         SCREENRECT = self.surfrect
@@ -630,8 +630,7 @@ class AliensEnv:
 
 # call the "main" function if running this script
 if __name__ == "__main__":
-    surface = pg.display.set_mode((840, 660))
-    env = AliensEnv(episode=-1, surface=surface, render=True, play_sounds=False)
+    env = AliensEnv(episode=-1, render=True, play_sounds=False)
     
     for i in range(200):
         done = False
