@@ -1,26 +1,5 @@
-#!/usr/bin/env python
 """ pygame.examples.aliens
-
 Shows a mini game where you have to defend against aliens.
-
-What does it show you about pygame?
-
-* pg.sprite, the difference between Sprite and Group.
-* dirty rectangle optimization for processing for speed.
-* music with pg.mixer.music, including fadeout
-* sound effects with pg.Sound
-* event processing, keyboard handling, QUIT handling.
-* a main loop frame limited with a game clock from pg.time.Clock
-* fullscreen switching.
-
-
-Controls
---------
-
-* Left and right arrows to move.
-* Space bar to shoot
-* f key to toggle between fullscreen.
-
 """
 
 import os
@@ -28,13 +7,13 @@ import random
 from typing import List
 import math
 import sys
-
-# import basic pygame modules
 import pygame as pg
 
-# see if we can load more than standard BMP
-if not pg.image.get_extended():
-    raise SystemExit("Sorry, extended image module required")
+import numpy as np
+import gymnasium as gym
+from gymnasium import spaces
+
+pg.font.init()
 
 
 # game constants
@@ -47,16 +26,20 @@ ALIEN_RELOAD = 12  # frames between new aliens
 SCREENRECT = None
 
 main_dir = os.path.split(os.path.abspath(__file__))[0]
+#window = pg.display.set_mode((300, 300))
 
-
-def load_image(file):
+def load_image(file, render_mode):
     """loads an image, prepares it for play"""
     file = os.path.join(main_dir, "data", file)
     try:
         surface = pg.image.load(file)
     except pg.error:
         raise SystemExit(f'Could not load image "{file}" {pg.get_error()}')
-    return surface.convert()
+
+    if render_mode == "human":
+        return surface.convert()
+    else:
+        return surface
 
 
 def load_sound(file):
@@ -336,7 +319,7 @@ class Episode(pg.sprite.Sprite):
 
     def __init__(self, episode, position, *groups):
         pg.sprite.Sprite.__init__(self, *groups)
-        self.font = pg.font.Font(None, 50)
+        self.font = pg.font.SysFont("comicsans", 50)
         self.font.set_italic(1)
         self.color = "white"
         self.lastepisode = -1
@@ -363,7 +346,7 @@ class Score(pg.sprite.Sprite):
 
     def __init__(self, position, *groups):
         pg.sprite.Sprite.__init__(self, *groups)
-        self.font = pg.font.Font(None, 30)
+        self.font = pg.font.SysFont("comicsans", 30)
         self.font.set_italic(1)
         self.color = "white"
         self.lastscore = -1
@@ -385,75 +368,55 @@ class Score(pg.sprite.Sprite):
             self.image = self.font.render(msg, 0, self.color)
 
 
-class AliensEnv:
-    def __init__(self, episode=0, render=True, fps=40, play_sounds=False):
-        self.window = pg.display.set_mode((840, 660))
-        self.surfrect = surface.get_rect()
+class AliensEnv(gym.Env):
+    metadata = {"render_modes": ["human", "rgb_array"], "fps": 40}
+    def __init__(self, episode=0, render_mode=None, play_sounds=False):
+        self.episode = episode
+        self.width = 640
+        self.height = 480
+        self.play_sounds = play_sounds
+        
+        self.observation_space = spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(24,),
+            dtype=np.float32
+        )
+        
+        self.action_space = spaces.Discrete(4)
+        
+        assert render_mode is None or render_mode in self.metadata["render_modes"], "Invalid Render Mode"
+        self.render_mode = render_mode
+
+        if self.render_mode == "human":
+            self.window = pg.display.set_mode((self.width, self.height))
+        self.clock = None
+        self.background = None
+        self.boom_sound = None
+        self.shoot_sound = None
+        
+        self.surface = pg.Surface((self.width, self.height))
+        self.surfrect = self.surface.get_rect()
         global SCREENRECT
         SCREENRECT = self.surfrect
-        self.width = self.surfrect.w
-        self.height = self.surfrect.h
-        self.render = render
-        self.play_sounds = play_sounds
-        self.n_actions = 4
-        self.n_observations = 24
-        self.fps = fps
-        self.episode = episode
         
-        # Initialize pygame
-        if self.play_sounds:
-            if pg.get_sdl_version()[0] == 2:
-                pg.mixer.pre_init(44100, 32, 2, 1024)
-        
-        pg.init()
-        
-        if self.play_sounds:
-            if pg.mixer and not pg.mixer.get_init():
-                print("Warning, no sound")
-                pg.mixer = None
-
-        self.fullscreen = False
-        # Set the display mode
-        self.winstyle = 0  # |FULLSCREEN
-        self.bestdepth = pg.display.mode_ok(self.surfrect.size, self.winstyle, 32)
-        #screen = pg.display.set_mode(SCREENRECT.size, winstyle, bestdepth)
-        if self.fullscreen:
-            self.surface = pg.display.set_mode(self.surfrect.size, pg.FULLSCREEN, self.bestdepth)
-
         # Load images, assign to sprite classes
-        # (do this before the classes are used, after screen setup)
-        img = load_image("player1.gif")
+        img = load_image("player1.gif", render_mode)
         Player.images = [img, pg.transform.flip(img, 1, 0)]
-        img = load_image("explosion1.gif")
+        
+        img = load_image("explosion1.gif", render_mode)
         Explosion.images = [img, pg.transform.flip(img, 1, 1)]
-        Alien.images = [load_image(im) for im in ("alien1.gif", "alien2.gif", "alien3.gif")]
-        Bomb.images = [load_image("bomb.gif")]
-        Shot.images = [load_image("shot.gif")]
-
-        # decorate the game window
-        icon = pg.transform.scale(Alien.images[0], (32, 32))
-        pg.display.set_icon(icon)
-        pg.display.set_caption("Pygame Aliens")
-        pg.mouse.set_visible(1)
-
-        # create the background, tile the bgd image
-        bgdtile = load_image("background.gif")
-        bgdtile = pg.transform.scale(bgdtile, (bgdtile.get_rect().width, self.surfrect.height))
-        self.background = pg.Surface(self.surfrect.size)
-        for x in range(0, self.width, bgdtile.get_width()):
-            self.background.blit(bgdtile, (x, 0))
-
-        # load the sound effects
-        if self.play_sounds:
-            self.boom_sound = load_sound("boom.wav")
-            self.shoot_sound = load_sound("car_door.wav")
-            if pg.mixer:
-                self.music = os.path.join(main_dir, "data", "house_lo.wav")
-                pg.mixer.music.load(self.music)
-                pg.mixer.music.play(-1)
-
-        self.clock = pg.time.Clock()
+        
+        Alien.images = [load_image(im, render_mode) for im in ("alien1.gif", "alien2.gif", "alien3.gif")]
+        Bomb.images = [load_image("bomb.gif", render_mode)]
+        Shot.images = [load_image("shot.gif", render_mode)]
         self.clicked = False
+    
+    def _get_info(self):
+        return f'Episode:{self.episode} Kills:{self.score}'
+        
+    def _get_obs(self):
+        self.player.get_data(bombs_grp=self.bombs, aliens_grp=self.aliens)
     
     def reset(self):
         self.score = 0
@@ -471,89 +434,94 @@ class AliensEnv:
         # initialize our starting sprites
         self.player = Player(self.shots, self.all, self.all)
         Alien(self.aliens, self.all, self.lastalien)
-        if pg.font:
+        
+        if self.render_mode == "human" and pg.font.get_init():
             text_pos = (50, self.height)
             episode = Episode(self.episode, text_pos, self.texts, self.all)
-            #self.all.add(episode)
             
             text_pos = (50, episode.rect.top)
             Score(text_pos, self.texts, self.all)
             
-        if self.render:
-            self.render_()
-        else:
-            self.render_texts()
+        if self.render_mode == "human":
+            self._render_frame()
         
-        observation = self.player.get_data(bombs_grp=self.bombs, aliens_grp=self.aliens)
-        info = self.get_info()
+        observation = self._get_obs()
+        info = self._get_info()
         
         return observation, info
+    
+    def render(self):
+        if self.render_mode == "rgb_array":
+            return self._render_frame()
+    
+    def _render_frame(self, pos=None):
+        if self.render_mode == "human" and self.clock is None:
+            pg.init()
+            #self.window = pg.display.set_mode((self.width, self.height))
+            self.clock = pg.time.Clock()
+            
+            # decorate the game window
+            icon = pg.transform.scale(Alien.images[0], (32, 32))
+            pg.display.set_icon(icon)
+            pg.display.set_caption("Pygame Aliens")
+            pg.mouse.set_visible(1)
+            
+            # create the background, tile the bgd image
+            bgdtile = load_image("background.gif", self.render_mode)
+            bgdtile = pg.transform.scale(bgdtile, (bgdtile.get_rect().width, self.surfrect.height))
+            self.background = pg.Surface(self.surfrect.size)
+            for x in range(0, self.width, bgdtile.get_width()):
+                self.background.blit(bgdtile, (x, 0))
+
+            # load the sound effects
+            if self.play_sounds:
+                if pg.get_sdl_version()[0] == 2:
+                    pg.mixer.pre_init(44100, 32, 2, 1024)
+            
+                if pg.mixer and not pg.mixer.get_init():
+                    print("Warning, no sound")
+                    pg.mixer = None
+                
+                if pg.mixer:
+                    music = os.path.join(main_dir, "data", "house_lo.wav")
+                    pg.mixer.music.load(music)
+                    pg.mixer.music.play(-1)
+                    
+                    self.boom_sound = load_sound("boom.wav")
+                    self.shoot_sound = load_sound("car_door.wav")
         
-    def get_info(self):
-        return f'Episode:{self.episode} Kills:{self.score}'
-    
-    def render_texts(self):
-        self.surface.fill('black')
-        self.texts.draw(self.surface)
-        pg.display.flip()
-    
-    def render_(self, pos=None, flip=False):
-        # clear/erase the last drawn sprites
         self.surface.blit(self.background, (0, 0))
-        
-        #if flip or pos is not None:
-        #    self.surface.blit(self.background, (0, 0))
-        #else:
-        #    self.all.clear(self.surface, self.background)
         
         if pos is not None:
             for i in range(4, len(pos), 2):  # positions start from index 4
                 pos_ = (pos[i], pos[i+1])
                 if pos_ != (0, 0):
                     self.draw_line(pos_)
-                
-        # draw the scene
-        #dirty = self.all.draw(self.surface)
-        #pg.display.update(dirty)
         
         self.all.draw(self.surface)
-        pg.display.flip()    
         
-        # cap the framerate at 40fps. Also called 40HZ or 40 times per second.
-        self.clock.tick(self.fps)
+        if self.render_mode == "human":
+            self.window.blit(self.surface, (0, 0))
+            pg.event.pump()
+            pg.display.flip()  
+            self.clock.tick(self.metadata["fps"])
+        else:  # rgb_array
+            array = np.transpose(
+                np.array(pg.surfarray.pixels3d(self.surface)), axes=(1, 0, 2)
+            )
+            return array
     
     def step(self, action):
-        for event in pg.event.get():
-            if event.type == pg.QUIT:
-                self.close()
-                sys.exit()
-            if event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE:
-                self.close()
-                sys.exit()
-            if event.type == pg.KEYDOWN:
-                if event.key == pg.K_f:
-                    if not self.fullscreen:
-                        print("Changing to FULLSCREEN")
-                        surface_backup = self.surface.copy()
-                        self.surface = pg.display.set_mode(self.surfrect.size, self.winstyle | pg.FULLSCREEN, self.bestdepth)
-                        self.surface.blit(surface_backup, (0, 0))
-                    else:
-                        print("Changing to windowed mode")
-                        surface_backup = self.surface.copy()
-                        self.surface = pg.display.set_mode(self.surfrect.size, self.winstyle, self.bestdepth)
-                        self.surface.blit(surface_backup, (0, 0))
-                        
-                    pg.display.flip()
-                    self.fullscreen = not self.fullscreen
-            elif event.type == pg.MOUSEBUTTONDOWN:
-                self.clicked = True
-            elif event.type == pg.MOUSEBUTTONUP:
-                self.clicked = False
+        if self.render_mode == "human":
+            for event in pg.event.get():
+                if event.type == pg.QUIT:
+                    self.close()
+                    sys.exit()
         
         step_reward = 0
             
         # check for episode termination 
-        termination = not self.player.alive() or self.score >= 100
+        #termination = not self.player.alive() or self.score >= 100
 
         # update all the sprites
         if action == 0:
@@ -604,19 +572,15 @@ class AliensEnv:
             step_reward -= 2
             self.player.kill()
             
-        observation = self.player.get_data(bombs_grp=self.bombs, aliens_grp=self.aliens)
-        info = self.get_info()
-        
-        if self.render:
-            self.render_()
-        else:
-            if self.clicked:
-                #self.render_(pos=observation)
-                self.render_()
-            else:
-                self.render_texts()
+        observation = self._get_obs()
+        terminated = not self.player.alive()
+        truncated = self.score >= 100
+        info = self._get_info()
+
+        if self.render_mode == "human":
+            self._render_frame()
             
-        return observation, step_reward, termination, info
+        return observation, step_reward, terminated, truncated, info
     
     def draw_line(self, pos):
         pg.draw.line(self.surface, 'red', self.player.rect.midtop, pos)
@@ -628,20 +592,20 @@ class AliensEnv:
             pg.time.wait(1000)
         pg.quit()
 
-# call the "main" function if running this script
+
 if __name__ == "__main__":
-    env = AliensEnv(episode=-1, render=True, play_sounds=False)
-    
+    env = AliensEnv(episode=-1, render_mode="human", play_sounds=True)
     for i in range(200):
         done = False
         observation, info = env.reset()
         episode_reward = 0
-        
+
         while not done:
-            action = random.randrange(env.n_actions)
-            observation_, reward, done, info = env.step(action)
+            action = env.action_space.sample()
+            observation, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
             episode_reward += reward
             #print(reward)
         print(info, 'Reward:', episode_reward)
-        
+
     env.close()
