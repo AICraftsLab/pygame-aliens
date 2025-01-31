@@ -363,6 +363,7 @@ class AliensEnv(gym.Env):
         self.height = 480
         self.play_sounds = play_sounds
         self.episode = 0
+        self.clicked = False  # Is screen clicked?
         
         # observation space
         # for each alien: alienX, alienY, alienDirection
@@ -422,7 +423,6 @@ class AliensEnv(gym.Env):
         global RNG
         RNG = self.np_random
         self.score = 0
-        self.clicked = False
         
         # Initialize Game Groups
         self.aliens = pg.sprite.Group()
@@ -439,6 +439,8 @@ class AliensEnv(gym.Env):
         Alien(self.aliens, self.all, self.lastalien)
         
         if self.render_mode == "human" and pg.font.get_init():
+            if not pg.font.get_init():
+                pg.font.init()
             text_pos = (10, 0)
             episode = Episode(self.episode, text_pos, self.texts, self.all)
             
@@ -459,7 +461,6 @@ class AliensEnv(gym.Env):
     
     def _render_frame(self, show_lines=False):
         if self.render_mode == "human" and self.clock is None:
-            pg.init()
             #self.window = pg.display.set_mode((self.width, self.height))
             self.clock = pg.time.Clock()
             
@@ -603,26 +604,7 @@ class AliensEnv(gym.Env):
     
     def close(self):
         if self.play_sounds:
-            if pg.mixer:
+            if pg.mixer.get_init():
                 pg.mixer.music.fadeout(1000)
             pg.time.wait(1000)
         pg.quit()
-
-
-if __name__ == "__main__":
-    env = AliensEnv(render_mode="human", play_sounds=False)
-    print(env.observation_space.shape[0])
-    for i in range(200):
-        done = False
-        observation, info = env.reset()
-        episode_reward = 0
-        print(observation)
-        while not done:
-            action = env.action_space.sample()
-            observation, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            episode_reward += reward
-            #print(reward)
-        print(info, 'Reward:', episode_reward)
-
-    env.close()

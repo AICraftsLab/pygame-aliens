@@ -4,11 +4,11 @@ from itertools import count
 
 
 if __name__ == "__main__":
-    env = gym.make('Aliens', render_mode=None, play_sounds=False)
+    env = gym.make('Aliens', render_mode='human', play_sounds=False)
     print('Observations:', env.observation_space.shape[0])
     print('Actions:', env.action_space.n)
     
-    seed = None
+    seed = 32
     for i in count():
         done = False
         observation, info = env.reset(seed=seed)
@@ -22,3 +22,4 @@ if __name__ == "__main__":
             episode_reward += reward
         print(info, 'Reward:', episode_reward)
     env.close()
+    
