@@ -3,7 +3,6 @@ Shows a mini game where you have to defend against aliens.
 """
 
 import os
-import random
 from typing import List
 import math
 import sys
@@ -17,16 +16,16 @@ pg.font.init()
 
 
 # game constants
-MAX_SHOTS = 2  # most player bullets onscreen
+MAX_SHOTS = 2  # max player bullets onscreen
 ALIEN_ODDS = 22  # chances a new alien appears
-MAX_ALIENS = 3
+MAX_ALIENS = 5
 BOMB_ODDS = 60  # chances a new bomb will drop
 ALIEN_RELOAD = 12  # frames between new aliens
 #SCREENRECT = pg.Rect(0, 0, 720, 1472)  #640, 480
 SCREENRECT = None
+RNG = None
 
 main_dir = os.path.split(os.path.abspath(__file__))[0]
-#window = pg.display.set_mode((300, 300))
 
 def load_image(file, render_mode):
     """loads an image, prepares it for play"""
@@ -71,7 +70,8 @@ class Player(pg.sprite.Sprite):
     gun_offset = -11
     images: List[pg.Surface] = []
     nearest_n_aliens = MAX_ALIENS
-    nearest_n_bombs = 3
+    nearest_n_bombs = 5
+    shoot_sound = None
 
     def __init__(self, shots_grp, all_grp, *groups):
         pg.sprite.Sprite.__init__(self, *groups)
@@ -102,8 +102,8 @@ class Player(pg.sprite.Sprite):
         if self.reloading <= 0 and len(self.shots_grp) < MAX_SHOTS:
             Shot(self.gunpos(), self.shots_grp, self.all_grp)
             self.reloading = self.reloading_time
-            #if pg.mixer and shoot_sound is not None:
-            #    shoot_sound.play()
+            if pg.mixer and self.shoot_sound is not None:
+                self.shoot_sound.play()
         
     def update(self, **kwargs):
         action = None
@@ -176,29 +176,21 @@ class Player(pg.sprite.Sprite):
             nearest_bombs.append((0, 0))
             
         data = []
-        #data_heading = []
         
         data.extend(self.rect.midtop)  # 2
         data.append(self.get_direction())  # 1
         data.append(int(self.reloading > 0))  # 1
+        data.append(max(0, self.reloading))  # 1
         data.append(int(n_shots >= MAX_SHOTS))  # 1
         
-        #data_heading.extend(['selfx, selfy'])
-        #data_heading.append('direction')
-        #data_heading.append('is_reloading')
-        #data_heading.append('MaxShots')
-        
-        for pos in shots_positions:  # MAX_SHOTS 2x2=4
+        for pos in shots_positions:  # MAX_SHOTS * 2
             data.extend(pos)
-            #data_heading.extend(['shotx', 'shoty'])
         
-        for pos_dir in nearest_aliens:  # self.nearest_aliens 3x3=9
+        for pos_dir in nearest_aliens:  # MAX_ALIENS * 3
             data.extend(pos_dir)
-            #data_heading.extend(['alienx', 'alieny', 'aliendir'])
             
-        for pos in nearest_bombs:  # self.nearest_bombs 3x2=6
+        for pos in nearest_bombs:  # Player.nearest_n_bombs * 2
             data.extend(pos)
-            #data_heading.extend(['bombx', 'bomby'])
         
         return data
         
@@ -213,7 +205,7 @@ class Alien(pg.sprite.Sprite):
         pg.sprite.Sprite.__init__(self, *groups)
         self.image = self.images[0]
         self.rect = self.image.get_rect()
-        self.facing = random.choice((-1, 1)) * Alien.speed
+        self.facing = RNG.choice((-1, 1)) * Alien.speed
         self.frame = 0
         if self.facing < 0:
             self.rect.right = SCREENRECT.right
@@ -319,26 +311,24 @@ class Episode(pg.sprite.Sprite):
 
     def __init__(self, episode, position, *groups):
         pg.sprite.Sprite.__init__(self, *groups)
-        self.font = pg.font.SysFont("comicsans", 50)
+        self.font = pg.font.SysFont("comicsans", 30)
         self.font.set_italic(1)
         self.color = "white"
         self.lastepisode = -1
         self.update(episode=episode)
-        x, y = position
-        y -= self.font.size('Episode:')[1]
-        self.rect = self.image.get_rect().move((x, y))
+        self.rect = self.image.get_rect().move(position)
 
     def update(self, *args, **kwargs):
         episode = kwargs.get('episode')
         
         if episode is None:
-            episode = 'error'
+            episode = ''
             
         "We only update the episode in update() when it has changed."
         if episode != self.lastepisode:
             self.lastepisode = episode
             msg = f"Episode: {episode}"
-            self.image = self.font.render(msg, 0, self.color)
+            self.image = self.font.render(msg, 1, self.color)
 
 
 class Score(pg.sprite.Sprite):
@@ -346,43 +336,51 @@ class Score(pg.sprite.Sprite):
 
     def __init__(self, position, *groups):
         pg.sprite.Sprite.__init__(self, *groups)
-        self.font = pg.font.SysFont("comicsans", 30)
+        self.font = pg.font.SysFont("comicsans", 20)
         self.font.set_italic(1)
         self.color = "white"
         self.lastscore = -1
         self.update(score=0)
-        x, y = position
-        y -= self.font.size('Score:')[1]
-        self.rect = self.image.get_rect().move((x, y))
+        self.rect = self.image.get_rect().move(position)
 
     def update(self, *args, **kwargs):
         score = kwargs.get('score')
         
         if score is None:
-            score = 'error'
+            score = ''
             
         "We only update the score in update() when it has changed."
         if score != self.lastscore:
             self.lastscore = score
             msg = f"Score: {score}"
-            self.image = self.font.render(msg, 0, self.color)
+            self.image = self.font.render(msg, 1, self.color)
 
 
 class AliensEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "fps": 40}
-    def __init__(self, episode=0, render_mode=None, play_sounds=False):
-        self.episode = episode
+    def __init__(self, render_mode=None, play_sounds=False):
         self.width = 640
         self.height = 480
         self.play_sounds = play_sounds
+        self.episode = 0
+        
+        # observation space
+        # for each alien: alienX, alienY, alienDirection
+        # for each bomb and shot: X, Y
+        # playerX, playerY, playerDirection, reloading_time, is_reloading, canShoot
+        obs_num = MAX_ALIENS                * 3 + \
+                  Player.nearest_n_bombs    * 2 + \
+                  MAX_SHOTS                 * 2 + \
+                  6
         
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(24,),
+            shape=(obs_num,),
             dtype=np.float32
         )
         
+        # right, left, shoot, nothing
         self.action_space = spaces.Discrete(4)
         
         assert render_mode is None or render_mode in self.metadata["render_modes"], "Invalid Render Mode"
@@ -410,7 +408,6 @@ class AliensEnv(gym.Env):
         Alien.images = [load_image(im, render_mode) for im in ("alien1.gif", "alien2.gif", "alien3.gif")]
         Bomb.images = [load_image("bomb.gif", render_mode)]
         Shot.images = [load_image("shot.gif", render_mode)]
-        self.clicked = False
     
     def _get_info(self):
         return f'Episode:{self.episode} Kills:{self.score}'
@@ -418,8 +415,13 @@ class AliensEnv(gym.Env):
     def _get_obs(self):
         self.player.get_data(bombs_grp=self.bombs, aliens_grp=self.aliens)
     
-    def reset(self):
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        
+        global RNG
+        RNG = self.np_random
         self.score = 0
+        self.clicked = False
         
         # Initialize Game Groups
         self.aliens = pg.sprite.Group()
@@ -431,15 +433,15 @@ class AliensEnv(gym.Env):
         self.alienreload = ALIEN_RELOAD
         self.episode += 1
         
-        # initialize our starting sprites
+        # initialize the starting sprites
         self.player = Player(self.shots, self.all, self.all)
         Alien(self.aliens, self.all, self.lastalien)
         
         if self.render_mode == "human" and pg.font.get_init():
-            text_pos = (50, self.height)
+            text_pos = (10, 0)
             episode = Episode(self.episode, text_pos, self.texts, self.all)
             
-            text_pos = (50, episode.rect.top)
+            text_pos = (10, episode.rect.bottom)
             Score(text_pos, self.texts, self.all)
             
         if self.render_mode == "human":
@@ -454,7 +456,7 @@ class AliensEnv(gym.Env):
         if self.render_mode == "rgb_array":
             return self._render_frame()
     
-    def _render_frame(self, pos=None):
+    def _render_frame(self, show_lines=False):
         if self.render_mode == "human" and self.clock is None:
             pg.init()
             #self.window = pg.display.set_mode((self.width, self.height))
@@ -489,14 +491,24 @@ class AliensEnv(gym.Env):
                     
                     self.boom_sound = load_sound("boom.wav")
                     self.shoot_sound = load_sound("car_door.wav")
+                    
+                    Player.shoot_sound = self.shoot_sound
         
         self.surface.blit(self.background, (0, 0))
         
-        if pos is not None:
-            for i in range(4, len(pos), 2):  # positions start from index 4
-                pos_ = (pos[i], pos[i+1])
-                if pos_ != (0, 0):
-                    self.draw_line(pos_)
+        nearest_aliens = self.player.get_nearest_aliens_pos_and_dir(self.aliens)
+        nearest_bombs = self.player.get_nearest_bombs_pos(self.bombs)
+        
+        if show_lines:
+            for x, y, _ in nearest_aliens:
+                self.draw_line((x, y))
+            
+            for x, y in nearest_bombs:
+                self.draw_line((x, y))
+            
+            for shot in self.shots:
+                pos = shot.get_position()
+                self.draw_line(pos)
         
         self.all.draw(self.surface)
         
@@ -517,6 +529,9 @@ class AliensEnv(gym.Env):
                 if event.type == pg.QUIT:
                     self.close()
                     sys.exit()
+                if event.type == pg.MOUSEBUTTONDOWN:
+                    self.clicked = not self.clicked
+                    
         
         step_reward = 0
             
@@ -538,12 +553,12 @@ class AliensEnv(gym.Env):
         # Create new alien
         if self.alienreload >= 0:
             self.alienreload -= 1
-        elif len(self.aliens) < MAX_ALIENS and not int(random.random() * ALIEN_ODDS):
+        elif len(self.aliens) < MAX_ALIENS and not int(RNG.random() * ALIEN_ODDS):
             Alien(self.aliens, self.all, self.lastalien)
             self.alienreload = ALIEN_RELOAD
 
         # Drop bombs
-        if self.lastalien and not int(random.random() * BOMB_ODDS):
+        if self.lastalien and not int(RNG.random() * BOMB_ODDS):
             Bomb(self.lastalien.sprite, self.all, self.bombs, self.all)
 
         # Detect collisions between aliens and players.
@@ -578,7 +593,7 @@ class AliensEnv(gym.Env):
         info = self._get_info()
 
         if self.render_mode == "human":
-            self._render_frame()
+            self._render_frame(self.clicked)
             
         return observation, step_reward, terminated, truncated, info
     
@@ -594,7 +609,8 @@ class AliensEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    env = AliensEnv(episode=-1, render_mode="human", play_sounds=True)
+    env = AliensEnv(render_mode="human", play_sounds=False)
+    print(env.observation_space.shape[0])
     for i in range(200):
         done = False
         observation, info = env.reset()
