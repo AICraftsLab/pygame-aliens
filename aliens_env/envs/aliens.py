@@ -25,7 +25,7 @@ ALIEN_RELOAD = 12  # frames between new aliens
 SCREENRECT = None
 RNG = None
 
-main_dir = os.path.split(os.path.abspath(__file__))[0]
+main_dir = ''  # root
 
 def load_image(file, render_mode):
     """loads an image, prepares it for play"""
@@ -410,10 +410,11 @@ class AliensEnv(gym.Env):
         Shot.images = [load_image("shot.gif", render_mode)]
     
     def _get_info(self):
-        return f'Episode:{self.episode} Kills:{self.score}'
+        return dict(Episode=self.episode, Kills=self.score)
         
     def _get_obs(self):
-        self.player.get_data(bombs_grp=self.bombs, aliens_grp=self.aliens)
+        obs = self.player.get_data(bombs_grp=self.bombs, aliens_grp=self.aliens)
+        return np.array(obs, dtype=np.float32)
     
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -615,7 +616,7 @@ if __name__ == "__main__":
         done = False
         observation, info = env.reset()
         episode_reward = 0
-
+        print(observation)
         while not done:
             action = env.action_space.sample()
             observation, reward, terminated, truncated, info = env.step(action)
