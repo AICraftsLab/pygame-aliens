@@ -481,7 +481,8 @@ class AliensEnv(gym.Env):
             if self.play_sounds:
                 if pg.get_sdl_version()[0] == 2:
                     pg.mixer.pre_init(44100, 32, 2, 1024)
-            
+                    
+                pg.mixer.init()
                 if pg.mixer and not pg.mixer.get_init():
                     print("Warning, no sound")
                     pg.mixer = None
@@ -536,9 +537,6 @@ class AliensEnv(gym.Env):
                     
         
         step_reward = 0
-            
-        # check for episode termination 
-        #termination = not self.player.alive() or self.score >= 100
 
         # update all the sprites
         if action == 0:
