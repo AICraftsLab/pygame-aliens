@@ -44,7 +44,8 @@ if __name__ == "__main__":
     model_file_path = None
     stats_file_path = None
     
-    os.makedirs(save_dir)
+    # Save_dir should not exist if is_new_training
+    os.makedirs(save_dir, exist_ok= not is_new_training)
     
     timesteps = 5e6
     num_cpu = 20  # Env nums

@@ -4,11 +4,11 @@ from itertools import count
 
 
 if __name__ == "__main__":
-    env = gym.make('Aliens', render_mode='human', play_sounds=False)
+    env = gym.make('Aliens', render_mode='human', play_sounds=True)
     print('Observations:', env.observation_space.shape[0])
     print('Actions:', env.action_space.n)
     
-    seed = 32
+    seed = None
     for i in count():
         done = False
         observation, info = env.reset(seed=seed)
